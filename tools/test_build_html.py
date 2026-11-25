@@ -247,6 +247,10 @@ class BuildHtmlTest(unittest.TestCase):
         ):
             self.assertEqual(hanja_readings.plain_reading_string(hanja), reading, hanja)
 
+    def test_default_output_file_has_english_name(self):
+        out = build_html.DEFAULT_OUT
+        self.assertEqual((out.parent.name, out.name), ("transcription", "sarye_pyeollam.html"))
+
     def test_jumps_are_instant_and_clicked_toc_item_is_highlighted(self):
         # 문서가 커서 부드러운 스크롤은 도착까지 1초 넘게 걸린다. 모든 이동은 즉시 이동이어야 한다.
         doc = build_html.generate_html_document(

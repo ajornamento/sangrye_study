@@ -8,7 +8,7 @@
 - [x] 3. 시범 전사 — 2026-11-25 사용자 승인
 - [x] 4. 본 전사 (권3–6 상례 본문 312쪽 완료; 圖式 30쪽은 보류)
 - [ ] 5. 검수 ← 다음 단계
-- [x] 6. 합본 (`tools/build.py` 권별 마크다운 합본 및 `tools/build_html.py` 통합 HTML 문서 `transcription/사례편람.html` 완성, 테스트 17개 통과)
+- [x] 6. 합본 (`tools/build.py` 권별 마크다운 합본 및 `tools/build_html.py` 통합 HTML 문서 `transcription/sarye_pyeollam.html` 완성, 테스트 17개 통과)
 
 ## 다음 할 일
 **권3~권6(喪禮一~喪禮四) 본문 전체 1차 전사 완료** (총 312쪽, 빌드 오류 0건, 판독 불가 `□` 0곳, 확인 필요 `[?]` 0곳).

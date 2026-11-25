@@ -28,6 +28,6 @@
 
 - 전사 파일(`transcription/pages/p*.md`) 변경 시: `python tools/build.py` 실행.
 - 번역(`translation/*.md`)·독음(`tools/hanja_readings.py`)·HTML 빌더(`tools/build_html.py`) 변경 시:
-  1. `python tools/build_html.py`로 `transcription/사례편람.html`을 재빌드한다.
+  1. `python tools/build_html.py`로 `transcription/sarye_pyeollam.html`을 재빌드한다.
   2. `python -m unittest discover -s tools -v`를 실행하여 블록 정렬, 괄호 균형, 독음 누락 여부, HTML 태그 중첩 테스트가 모두 통과하는지 확인한다.
 - Windows PowerShell 5.1 환경에서 명령을 이어 실행할 때는 `&&` 대신 `; if ($LASTEXITCODE -eq 0) { ... }` 구문을 사용한다.

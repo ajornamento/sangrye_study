@@ -1,7 +1,7 @@
 """전사된 쪽 파일(transcription/pages/p*.md)을 읽어 『사례편람』(상례편) 통합 HTML 정본 문서를 생성한다.
 
   python tools/build_html.py
-  python tools/build_html.py --out transcription/사례편람.html
+  python tools/build_html.py --out transcription/sarye_pyeollam.html
 """
 import argparse
 import html
@@ -25,6 +25,7 @@ PAGE_TOKEN = re.compile(r"\x00PAGE:(\d+):([^\x01]*)\x01")
 IDS_SEQ = re.compile(r"[\u2ff0-\u2ffb].{2}")
 FORM_START = re.compile(r"^(?:〈[附부]〉\s*)?【[^】]*(?:式|식)】")
 COLOPHON = re.compile(r"^四禮便覽卷之[三四五六]$")
+DEFAULT_OUT = Path(__file__).resolve().parent.parent / "transcription" / "sarye_pyeollam.html"
 TRANS_META = re.compile(r"\A\s*<!--\s*vol:\s*(\S+)\s*\|\s*section:\s*(\S+)\s*-->")
 
 
@@ -2167,8 +2168,7 @@ def generate_html_document(pages, translations=None):
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser(description="사례편람 전사본 HTML 문서 생성기")
-    default_out = Path(__file__).resolve().parent.parent / "transcription" / "사례편람.html"
-    ap.add_argument("--out", type=Path, default=default_out, help="출력 HTML 파일 경로")
+    ap.add_argument("--out", type=Path, default=DEFAULT_OUT, help="출력 HTML 파일 경로")
     args = ap.parse_args()
 
     root = Path(__file__).resolve().parent.parent / "transcription"
