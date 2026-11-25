@@ -228,6 +228,35 @@ def render_inline(text, stack, page_notes, current_page_ref, jegu_items=False, w
     return "".join(out)
 
 
+RUBY_TOKEN = re.compile(r"<ruby>([^<]*)<rt>([^<]*)</rt></ruby>|<rt>[^<]*</rt>|<[^>]*>|[^<]+")
+
+
+def defer_ruby(unit_html):
+    """본문 한 덩어리의 한자음 루비를 걷어 내고, 독음을 덩어리의 data-r 속성에 모은다.
+
+    data-r 의 n번째 글자는 덩어리 본문(rt 제외) n번째 글자의 독음이고 '.' 은 독음 없음이다.
+    브라우저는 화면 근처의 덩어리에만 루비를 다시 만든다(hydrate).
+    """
+    out, readings = [], []
+    for m in RUBY_TOKEN.finditer(unit_html):
+        token, base, reading = m.group(0), m.group(1), m.group(2)
+        if base is not None and len(html.unescape(base)) == 1 and len(reading) == 1:
+            out.append(base)
+            readings.append(reading)
+            continue
+        out.append(token)
+        if base is not None:  # 한 글자씩이 아닌 루비는 그대로 둔다
+            readings.append("." * len(html.unescape(base)))
+        elif not token.startswith("<"):
+            readings.append("." * len(html.unescape(token)))
+    data = "".join(readings).rstrip(".")
+    result = "".join(out)
+    if not data:
+        return result
+    end = result.index(">")
+    return f'{result[:end]} data-r="{data}"{result[end:]}'
+
+
 def plain_heading_text(raw):
     """목차 표시용으로 머리말에서 쪽 토큰을 제거하고 공백을 정리한다."""
     s = strip_page_tokens(raw)
@@ -547,7 +576,7 @@ def build_volume_html(vol_key, pages, page_meta, page_notes, translations=None):
         raise ValueError(f"{vol_key}: 번역 괄호 미닫힘: {ko_stack}")
 
     html_parts.append("</section>")
-    return "\n".join(html_parts), toc
+    return "\n".join(defer_ruby(part) for part in html_parts), toc
 
 
 CSS_STYLES = """
@@ -624,8 +653,6 @@ body[data-theme="dark"] {
 }
 
 * { box-sizing: border-box; }
-
-html { scroll-behavior: smooth; }
 
 body {
   margin: 0;
@@ -896,6 +923,12 @@ body {
 
 .volume-section:last-of-type { border-bottom: none; }
 .volume-section.hidden-vol { display: none; }
+
+/* 화면 밖 본문의 배치를 미뤄 열기와 권 전환을 빠르게 한다. 제목은 이동 대상이라 제외한다. */
+.volume-section:not(.guide-section) > :not(h2, h3, header) {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 150px;
+}
 
 .vol-header {
   text-align: center;
@@ -1435,6 +1468,7 @@ mark.search-hit.current-hit {
     padding: 0;
   }
   .volume-section.hidden-vol { display: block !important; }
+  .volume-section:not(.guide-section) > :not(h2, h3, header) { content-visibility: visible; }
 }
 """
 
@@ -1479,7 +1513,7 @@ JS_SCRIPT = r"""
   volTabs.forEach(btn => {
     btn.addEventListener('click', () => {
       setActiveVol(btn.dataset.target);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      window.scrollTo({ top: 0, behavior: 'instant' });
     });
   });
 
@@ -1489,6 +1523,15 @@ JS_SCRIPT = r"""
       head.parentElement.classList.toggle('collapsed');
     });
   });
+
+  // 목차를 누른 직후에는 스크롤 감시가 강조 항목을 바꾸지 않게 한다
+  let pinTocUntil = 0;
+
+  // 화면 밖 본문은 크기를 어림해 두므로, 주변이 실제 크기로 그려지는 몇 프레임 동안 위치를 다시 맞춘다
+  function jumpTo(el, frames = 6) {
+    el.scrollIntoView({ behavior: 'instant', block: 'center' });
+    if (frames > 0) requestAnimationFrame(() => jumpTo(el, frames - 1));
+  }
 
   // 목차 링크 클릭 시 숨겨진 권이면 자동 표시
   function revealElementSection(el) {
@@ -1510,7 +1553,13 @@ JS_SCRIPT = r"""
             body.classList.remove('hide-pages');
             document.getElementById('btnPages')?.classList.add('active');
           }
-          target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          jumpTo(target);
+          // 즉시 이동하면 중간 제목을 지나가지 않으므로 누른 목차 항목을 직접 강조한다
+          if (link.classList.contains('toc-link')) {
+            document.querySelectorAll('.toc-link.active').forEach(el => el.classList.remove('active'));
+            link.classList.add('active');
+            pinTocUntil = performance.now() + 1000;
+          }
           if (target.classList.contains('page-mark')) {
             target.classList.add('flash-target');
             setTimeout(() => target.classList.remove('flash-target'), 1400);
@@ -1550,6 +1599,57 @@ JS_SCRIPT = r"""
   bindToggle('btnJeguSplit', 'jegu-split', false);
   bindToggle('btnPages', 'hide-pages', true);
 
+  // 한자음 루비는 화면 근처의 본문에만 만든다. 5만 개를 모두 두면 권을 바꿀 때 몇 초씩 걸린다.
+  const rubyUnits = document.querySelectorAll('.volume-section [data-r]');
+  const nearUnits = new Set();
+
+  function hydrate(unit) {
+    if (unit.dataset.hy) return;
+    unit.dataset.hy = '1';
+    const readings = unit.dataset.r;
+    const walker = document.createTreeWalker(unit, NodeFilter.SHOW_TEXT, {
+      acceptNode: n => n.parentElement.closest('rt') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT
+    });
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    let at = 0;
+    nodes.forEach(node => {
+      const frag = document.createDocumentFragment();
+      let plain = '', changed = false;
+      for (const ch of node.nodeValue) {
+        const reading = readings[at++];
+        if (!reading || reading === '.') { plain += ch; continue; }
+        if (plain) { frag.append(plain); plain = ''; }
+        const ruby = document.createElement('ruby');
+        ruby.className = 'lz';
+        const rt = document.createElement('rt');
+        rt.textContent = reading;
+        ruby.append(ch, rt);
+        frag.append(ruby);
+        changed = true;
+      }
+      if (!changed) return;
+      if (plain) frag.append(plain);
+      node.replaceWith(frag);
+    });
+  }
+
+  function dehydrate(unit) {
+    if (!unit.dataset.hy) return;
+    delete unit.dataset.hy;
+    unit.querySelectorAll('ruby.lz').forEach(rb => {
+      rb.querySelector('rt').remove();
+      rb.replaceWith(...rb.childNodes);
+    });
+    unit.normalize();
+  }
+
+  // 한자음이 꺼져 있지 않으면 화면 근처 덩어리만 루비를 갖게 맞춘다
+  function syncRuby() {
+    const on = body.dataset.ruby !== 'off';
+    rubyUnits.forEach(u => (on && nearUnits.has(u)) ? hydrate(u) : dehydrate(u));
+  }
+
   // 한자 독음(루비) 보기 모드 전환 (켜짐 -> 마우스 -> 꺼짐)
   const rubyModes = ['on', 'hover', 'off'];
   const rubyLabels = { on: '한자음: 켜짐', hover: '한자음: 마우스', off: '한자음: 꺼짐' };
@@ -1563,6 +1663,7 @@ JS_SCRIPT = r"""
       btnRuby.classList.toggle('active', m !== 'off');
     }
     localStorage.setItem('sarye_ruby', m);
+    syncRuby();
   }
   applyRubyMode();
   btnRuby?.addEventListener('click', () => {
@@ -1642,7 +1743,7 @@ JS_SCRIPT = r"""
   function clearHighlights() {
     document.querySelectorAll('mark.search-hit').forEach(m => {
       const parent = m.parentNode;
-      parent.replaceChild(document.createTextNode(m.textContent), m);
+      m.replaceWith(...m.childNodes);
       parent.normalize();
     });
     hits = [];
@@ -1719,6 +1820,9 @@ JS_SCRIPT = r"""
       highlightInStream(baseEntries, query);
       // 한글 검색어가 원문 한자 블록에서 직접 매칭되지 않았으면 루비 독음(rt) 연속열에서도 검색
       if (isHangulQuery && hits.length === 0 && !blk.classList.contains('ko-block') && !blk.classList.contains('ko-subpara') && !blk.classList.contains('ko-heading') && !blk.classList.contains('ko-span')) {
+        // 아직 루비를 만들지 않은 덩어리는 모아 둔 독음에 검색어가 있을 때만 만든다
+        const unit = blk.closest('[data-r]');
+        if (unit && (unit.dataset.r.replaceAll('.', '').includes(query) || unit.querySelector('.ids-glyph'))) hydrate(unit);
         const rtEntries = [];
         let rtOffset = 0;
         blk.querySelectorAll('ruby').forEach(rb => {
@@ -1763,7 +1867,7 @@ JS_SCRIPT = r"""
     const cur = hits[hitIdx];
     cur.classList.add('current-hit');
     revealElementSection(cur);
-    cur.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    jumpTo(cur);
     searchCount.textContent = (hitIdx + 1) + ' / ' + hits.length;
   }
 
@@ -1780,7 +1884,7 @@ JS_SCRIPT = r"""
         body.classList.remove('hide-pages');
         document.getElementById('btnPages')?.classList.add('active');
         revealElementSection(target);
-        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        jumpTo(target);
         target.classList.add('flash-target');
         setTimeout(() => target.classList.remove('flash-target'), 1500);
         searchCount.textContent = 'p.' + pm[1] + ' 이동';
@@ -1793,6 +1897,7 @@ JS_SCRIPT = r"""
     document.querySelectorAll('.volume-section:not(.guide-section)').forEach(sec => {
       highlightTextNodes(sec, q);
     });
+    syncRuby();
     if (hits.length > 0) {
       focusHit(0);
     } else {
@@ -1825,6 +1930,7 @@ JS_SCRIPT = r"""
   });
 
   const observer = new IntersectionObserver((entries) => {
+    if (performance.now() < pinTocUntil) return;
     entries.forEach(entry => {
       if (entry.isIntersecting) {
         const link = tocMap.get(entry.target.id);
@@ -1837,6 +1943,19 @@ JS_SCRIPT = r"""
   }, { rootMargin: '-12% 0px -78% 0px' });
 
   document.querySelectorAll('.sec-h2, .sec-h3').forEach(h => observer.observe(h));
+
+  const rubyObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      const unit = entry.target;
+      if (entry.isIntersecting) nearUnits.add(unit); else nearUnits.delete(unit);
+      if (entry.isIntersecting && body.dataset.ruby !== 'off') hydrate(unit); else dehydrate(unit);
+    });
+  }, { rootMargin: '1500px 0px' });
+  rubyUnits.forEach(u => rubyObserver.observe(u));
+
+  // 인쇄할 때는 모든 본문에 루비를 만들고, 끝나면 화면 근처만 남긴다
+  window.addEventListener('beforeprint', () => { if (body.dataset.ruby !== 'off') rubyUnits.forEach(hydrate); });
+  window.addEventListener('afterprint', syncRuby);
 })();
 """
 

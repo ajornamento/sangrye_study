@@ -85,5 +85,29 @@ class UncertainTest(unittest.TestCase):
         self.assertIn("□", found[1][1])
 
 
+class ReportTest(unittest.TestCase):
+    def test_row_shows_volume_and_section_carried_over_from_earlier_page(self):
+        pages = {132: page(132, "## 初終\n\n古"), 133: page(133, "要設[?]中")}
+        out = build.report(pages)
+        self.assertIn("# 확인 필요 (1곳)", out)
+        self.assertIn("| 쪽 | 권 | 편 | 문맥 |", out)
+        self.assertIn("| 133 | 권3 | 初終 | 要設[?]中 |", out)
+
+    def test_mark_before_a_new_heading_belongs_to_previous_section(self):
+        pages = {132: page(132, "## 襲\n\n古"),
+                 133: page(133, "甲[?]\n\n## 小斂\n\n乙[?]")}
+        rows = build.report(pages).splitlines()[-2:]
+        self.assertTrue(rows[0].startswith("| 133 | 권3 | 襲 |"), rows)
+        self.assertTrue(rows[1].startswith("| 133 | 권3 | 小斂 |"), rows)
+
+    def test_subheading_does_not_replace_section(self):
+        pages = {132: page(132, "## 初終\n\n### 復\n\n古[?]")}
+        self.assertIn("| 132 | 권3 | 初終 |", build.report(pages))
+
+    def test_section_does_not_carry_into_next_volume(self):
+        pages = {193: page(193, "## 大斂\n\n古"), 210: page(210, "禮[?]")}
+        self.assertIn("| 210 | 권4 |  | 禮[?] |", build.report(pages))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -103,15 +103,40 @@ def assemble(title, pages, numbers):
     return f"# 四禮便覽{title}\n\n## 목차\n\n" + "\n".join(contents) + f"\n\n---\n\n{out}\n"
 
 
+def locate(pages):
+    """[?] 와 □ 가 있는 곳을 (쪽, 권, 편, 앞뒤 문맥) 목록으로 돌려준다.
+
+    편은 그 자리 앞의 마지막 ## 제목이며, 권의 도(圖)나 본문이 새로 시작하면 비운다.
+    """
+    found, section, current = [], "", None
+    for n in sorted(pages):
+        volume, start = next(
+            ((name, first) for name, vol in VOLUMES.items()
+             for first, last in (vol["figures"], vol["body"]) if first <= n <= last),
+            ("", None))
+        if start != current:
+            section, current = "", start
+        text = body_of(pages[n])
+        headings = [(m.start(), m.group(2)) for m in HEADING.finditer(text) if m.group(1) == "##"]
+        for m in re.finditer(r"\[\?\]|□", text):
+            before = [name for position, name in headings if position < m.start()]
+            context = text[max(0, m.start() - 8):m.end() + 6].replace("\n", " ")
+            found.append((n, volume, before[-1] if before else section, context))
+        if headings:
+            section = headings[-1][1]
+    return found
+
+
 def uncertain(pages):
     """[?] 와 □ 가 있는 곳을 (쪽, 앞뒤 문맥) 목록으로 돌려준다."""
-    found = []
-    for n in sorted(pages):
-        text = body_of(pages[n])
-        for m in re.finditer(r"\[\?\]|□", text):
-            context = text[max(0, m.start() - 8):m.end() + 6].replace("\n", " ")
-            found.append((n, context))
-    return found
+    return [(n, context) for n, _, _, context in locate(pages)]
+
+
+def report(pages):
+    """확인필요.md 내용."""
+    found = locate(pages)
+    lines = "\n".join(f"| {n} | {v} | {s} | {c.replace('|', '/')} |" for n, v, s, c in found)
+    return f"# 확인 필요 ({len(found)}곳)\n\n| 쪽 | 권 | 편 | 문맥 |\n|---|---|---|---|\n{lines}\n"
 
 
 def main():
@@ -139,9 +164,7 @@ def main():
             (root / f"{name}.md").write_text(assemble(vol["title"], pages, done), encoding="utf-8")
 
     found = uncertain(pages)
-    lines = "\n".join(f"| {n} | {c.replace('|', '/')} |" for n, c in found)
-    (root / "확인필요.md").write_text(
-        f"# 확인 필요 ({len(found)}곳)\n\n| 쪽 | 문맥 |\n|---|---|\n{lines}\n", encoding="utf-8")
+    (root / "확인필요.md").write_text(report(pages), encoding="utf-8")
     unread = sum(body_of(t).count("□") for t in pages.values())
     print(f"판독 불가 □ {unread}곳, 불확실 [?] {len(found) - unread}곳")
     sys.exit(1 if failed else 0)
