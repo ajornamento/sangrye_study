@@ -251,6 +251,14 @@ class BuildHtmlTest(unittest.TestCase):
         out = build_html.DEFAULT_OUT
         self.assertEqual((out.parent.name, out.name), ("transcription", "sarye_pyeollam.html"))
 
+    def test_root_index_redirects_to_the_html_output(self):
+        root = build_html.DEFAULT_OUT.parent.parent
+        target = build_html.DEFAULT_OUT.relative_to(root).as_posix()
+        index = (root / "index.html").read_text(encoding="utf-8")
+        self.assertIn(f'content="0; url={target}"', index)
+        self.assertIn(f'location.replace("{target}" + location.hash)', index)
+        self.assertIn(f'<a href="{target}">', index)
+
     def test_jumps_are_instant_and_clicked_toc_item_is_highlighted(self):
         # 문서가 커서 부드러운 스크롤은 도착까지 1초 넘게 걸린다. 모든 이동은 즉시 이동이어야 한다.
         doc = build_html.generate_html_document(
