@@ -1,0 +1,3 @@
+document/*.pdf
+__pycache__/
+*.py[cod]
